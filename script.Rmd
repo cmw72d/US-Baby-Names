@@ -1,0 +1,273 @@
+---
+title: Exploring Female Names in the U.S.
+output:
+  html_document:
+    toc: true
+---
+  
+A quick review of U.S. Female names in the database using dplyr, ggvis and dygraphs. 
+
+I also created a shiny app. It is fun, take a look: http://shiny.journeysteps.com/namesDBexp/
+
+Revisions: 
+
+* Feb 27, 2016 : Adding dygraphs for interactive visualization
+
+  
+```{r message=FALSE, warning=FALSE}
+library(dplyr) # to manipulate data
+library(ggvis) # for data visualization
+library(stringdist) # to look for similar names
+library(data.table) # to load data faster
+library(dygraphs) # for interactive data visualization
+```
+Loading data...
+```{r warning=FALSE}
+ndb <- tbl_df(read.csv("../input/NationalNames.csv")) #Kaggle
+```
+## Number of unique names by year and gender
+```{r warning=FALSE}
+ABY <- ndb %>%
+  group_by(Year, Gender) %>%
+  summarise(name_cnt = sum(Count),  # total count by Year and Gender
+            unq_names = n_distinct(Name)) #count # distinct names by Year and Gender
+
+ABY %>% 
+  ggvis(~Year, ~unq_names, stroke=~factor(Gender)) %>% 
+  layer_lines()
+```
+Comments
+
+* Looks like people are more creative with female names than male names
+* There is some explosion around 1915, probably due to immigration
+* Since 1944 (end of WW2) till around 2010 (recent recession) the influx of original names has been strong
+
+***
+## Adding some basic stats and run a few queries
+  
+* name_cnt : number of times the name was used 
+* nyears : number of years the name was used
+* fy : first year of use (in DB)
+* ly : last year of use (in DB)
+* std_cnt : standard deviation of the yearly counts
+* avg_cnt : average of the yearly counts
+* nsd : normalized standard deviation
+
+```{r warning=FALSE}
+
+ABN <- ndb %>%
+  filter(Gender == 'F') %>%
+  group_by(Name) %>%
+  summarise(name_cnt = sum(Count), 
+            nyears = n_distinct(Year), 
+            fy = min(Year), 
+            ly = max(Year),
+            std_cnt = sd(Count),
+            avg_cnt = mean(Count),
+            nsd = std_cnt/avg_cnt) 
+
+# get peak year by name             
+PeakYearF <- ndb %>%
+  filter(Gender == 'F') %>%
+  group_by(Name) %>%
+  filter(min_rank(desc(Count * 10000 + Year)) ==1)  %>%  #workaround to sort by Count and Year 
+  select ( Name, topYear = Year, CntTopYear = Count)
+#merge data back into ABN 
+ABN <- ABN %>% inner_join(PeakYearF, by = "Name") 
+
+sample_n(ABN,5)
+```
+Using ABN and ndb, we can do several interesting queries. 
+
+***
+  
+### Top 5 female names in database by use 
+  
+```{r warning=FALSE}
+Top5F <- ABN  %>%
+  ungroup() %>% # dplyr keeps prior grouping, here we need to remove it 
+  arrange(desc(name_cnt)) %>%
+  slice(1:5) #get top 5 
+
+ndb   %>%
+  filter(Gender == 'F', Name %in% Top5F$Name )  %>%
+  select (Name, Year, Count) %>% 
+  ggvis(~Year, ~Count, stroke = ~factor(Name)) %>% 
+  layer_lines()
+```
+Even though these are the most popular names, their peak is in the past for most of them.
+***
+  
+### Top female names that have been in use for 100 years and exceeded 1M uses
+  
+```{r warning=FALSE}
+tmp3 <- ABN %>%
+  filter(name_cnt > 1000000, nyears >= 100) %>%
+  arrange(desc(name_cnt))
+
+ndb   %>%
+  filter(Gender == 'F', Name %in% tmp3$Name)  %>%
+  select (Name, Year, Count) %>% 
+  ggvis(~Year, ~Count, stroke = ~factor(Name)) %>% 
+  layer_lines()
+
+```
+
+### Names that have recently peaked 
+
+```{r warning=FALSE}
+tmp2 <- ABN %>%
+  filter(CntTopYear > 8000, topYear >= 2010, name_cnt > 50000) %>%
+  arrange(desc(name_cnt))
+
+ndb   %>%
+  filter(Gender == 'F', Name %in% tmp2$Name)  %>%
+  select (Name, Year, Count) %>% 
+  ggvis(~Year, ~Count, stroke = ~factor(Name)) %>% 
+  layer_lines()
+```
+
+### New names since 2008 that passed the 100 count nationally 
+
+```{r warning=FALSE}
+tmp4 <- ABN %>%
+  filter( fy >= 2008,  CntTopYear> 100) %>%
+  arrange(desc(name_cnt)) %>%
+  slice(1:6)
+
+ndb   %>%
+  filter(Gender == 'F', Name %in% tmp4$Name)  %>%
+  select (Name, Year, Count) %>% 
+  ggvis(~Year, ~Count, stroke = ~factor(Name)) %>% 
+  layer_lines()
+```
+
+### Old names that haven't been used since 2000 
+
+```{r warning=FALSE}
+tmp5 <- ABN %>%
+  filter( fy < 1930, ly < 2000, CntTopYear> 500) %>%
+  arrange(desc(name_cnt)) %>%
+  slice(1:6)
+
+ndb   %>%
+  filter(Gender == 'F', Name %in% tmp5$Name)  %>%
+  select (Name, Year, Count) %>% 
+  ggvis(~Year, ~Count, stroke = ~factor(Name)) %>% 
+  layer_lines()
+
+```
+
+### "One Shot" names, had a one time high peak 
+
+The most recent three might not qualify since their peak is quite recent.
+
+```{r warning=FALSE}
+tmp7 <- ABN %>%
+  filter(  name_cnt > 1000, 
+           nsd >= 2 # using normalized std dev. to get names with high peaks 
+           ) %>%
+  arrange(desc(name_cnt)) %>%
+  slice(1:6)
+
+ndb   %>%
+  filter(Gender == 'F', Name %in% tmp7$Name )  %>%
+  select (Name, Year, Count) %>% 
+  ggvis(~Year, ~Count, stroke = ~factor(Name)) %>% 
+  layer_lines()
+
+```
+***
+
+## Consistent names, ploting with dygraphs (NEW)
+
+Filtering names with low variability and top year less than 2000 to exclude a couple of names that have higher volume and make the rest too flat. 
+
+```{r warning=FALSE, message=FALSE, fig.width=9}
+tmp8 <- ABN %>%
+  filter(CntTopYear < 2000,
+         nsd < 0.5) %>%   # using normalized std dev. to get names with less count variability in time
+  arrange(desc(name_cnt)) %>%
+  slice(1:10) # increase to 10 since highlighting makes easier to read the graph
+
+library(lubridate)
+library(tidyr)
+library(xts)
+
+nameSeries <-ndb   %>%
+  filter(Gender == 'F', Name %in% tmp8$Name )  %>%
+  select (Name, Year  , Count) %>%
+  mutate( Year =ymd(paste0(Year,'0101') ))  #convert Year Integer to date
+
+# re-shape table to pivot names into columns
+nameSeries <- spread(nameSeries, Name, Count) 
+
+#convert to time series data class
+vis <-xts(nameSeries, order.by = nameSeries$Year)
+
+#plot with dygraph to make it interactive
+# add range selector, allows to change the range of years for the visualization
+# add highlighting of a particular name
+dygraph(vis) %>% 
+  dyRangeSelector() %>%
+  dyHighlight(highlightCircleSize = 4, 
+              highlightSeriesBackgroundAlpha = 0.5,
+              hideOnMouseOut = TRUE)%>%
+  dyLegend(show = "follow")
+
+```
+
+***
+  
+## Looking for similar names using string distance
+  
+Use stringdist to find similar names, not perfect but decent close enough names.
+
+```{r warning=FALSE}
+# reducing the list of names to more recent and familar names 
+# names used at least till 1961 and that had a top count higher than 200 
+relativePopFNames <- ABN %>% 
+  filter(ly>1960,CntTopYear>200)  %>%
+  select(Name) 
+vnames <-relativePopFNames$Name
+
+```
+### Carla
+
+```{r warning=FALSE}
+vdist<- stringdist("carla",tolower(vnames),method="osa") 
+filteredList <- vnames[vdist <=1 ]
+
+snames <- ABN %>%
+  filter( Name %in% filteredList) %>%
+  arrange(desc(name_cnt)) %>%
+  slice(1:6)
+
+ndb   %>%
+  filter(Gender == 'F', Name  %in% snames$Name )  %>%
+  select (Name, Year, Count) %>% 
+  ggvis(~Year, ~Count, stroke = ~factor(Name)) %>% 
+  layer_lines()
+
+```
+
+### Tania
+
+```{r warning=FALSE}
+
+vdist<- stringdist("tania",tolower(vnames),method="osa") 
+filteredList <- vnames[vdist <=1 ]
+
+snames <- ABN %>%
+  filter( Name %in% filteredList) %>%
+  arrange(desc(name_cnt)) %>%
+  slice(1:6)
+
+ndb   %>%
+  filter(Gender == 'F', Name  %in% snames$Name )  %>%
+  select (Name, Year, Count) %>% 
+  ggvis(~Year, ~Count, stroke = ~factor(Name)) %>% 
+  layer_lines()
+
+
+```
