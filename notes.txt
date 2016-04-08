@@ -1,0 +1,20 @@
+93889 unique names
+
+104110 unique name/gender pairs
+
+10221 gender neutral names
+
+unique(names$Name)
+unique(names[c("Name","Gender")])
+
+
+
+library("TTR")
+
+names["ROC"] = NA
+
+function(name_frame) {
+	pairs = unique(name_frame[c("Name","Gender")])
+	apply(pairs,1,function(x) {sub = subset(name_frame,Name==x[1] & Gender == x[2]); name_frame[name_frame$Id %in% sub$Id,]["ROC"] <<- ROC(sub$Count) })
+	return (name_frame)
+}
