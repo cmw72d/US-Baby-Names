@@ -17,14 +17,15 @@ both = filtered_extrema %>%
 ggplot(both, aes(x = Year,y = ROC,col = Name))+geom_point()
 
 female_neg = filtered_extrema %>%
-  filter(Gender == 'F', ROC < 0, Count >= 500)
+  filter(Gender == 'F', ROC < 0, Count >= 100)
 ggplot(female_neg, aes(x = Year,y = ROC,col = Name))+geom_point()
 
 male_neg = filtered_extrema %>%
-  filter(Gender == 'M', ROC < 0, Count >= 500)
+  filter(Gender == 'M', ROC < 0, Count >= 100)
 ggplot(male_neg, aes(x = Year,y = ROC,col = Name))+geom_point()
 
 both_neg = filtered_extrema %>%
-  filter(ROC < 0, Count > 100)
+  filter(ROC < 0, Count >=100)
 ggplot(both_neg, aes(x = Year,y = ROC,col = Name))+geom_point()
+
 
